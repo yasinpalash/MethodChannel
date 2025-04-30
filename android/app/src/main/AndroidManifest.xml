@@ -2,7 +2,13 @@
 
     <!-- Add this permission -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Network permissions -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Location permissions -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <application
         android:label="methodchannel"
         android:name="${applicationName}"
