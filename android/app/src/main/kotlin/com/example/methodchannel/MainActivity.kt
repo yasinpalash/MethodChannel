@@ -11,6 +11,8 @@ import android.os.Bundle
 import android.content.Context
 import android.content.IntentFilter
 import android.content.BroadcastReceiver
+import android.location.Address
+import android.location.Geocoder
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -25,6 +27,11 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.util.Locale
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity: FlutterActivity() {
     private val METHOD_CHANNEL = "native_bridge/method"
@@ -43,6 +50,7 @@ class MainActivity: FlutterActivity() {
     private var chargingEventSink: EventChannel.EventSink? = null
 
     private var isFlashlightOn = false
+    private val coroutineScope = CoroutineScope(Dispatchers.Main)
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -171,6 +179,62 @@ class MainActivity: FlutterActivity() {
         sensorManager?.unregisterListener(accelerometerListener)
     }
 
+    private fun getAddressFromLocation(latitude: Double, longitude: Double, callback: (String?) -> Unit) {
+        coroutineScope.launch {
+            try {
+                val geocoder = Geocoder(context, Locale.getDefault())
+
+                // Use different methods based on API level
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    // For Android 13+ (API 33+)
+                    geocoder.getFromLocation(latitude, longitude, 1) { addresses ->
+                        val address = if (addresses.isNotEmpty()) formatAddress(addresses[0]) else null
+                        callback(address)
+                    }
+                } else {
+                    // For older Android versions
+                    withContext(Dispatchers.IO) {
+                        val addresses = geocoder.getFromLocation(latitude, longitude, 1)
+                        val address = if (!addresses.isNullOrEmpty()) formatAddress(addresses[0]) else null
+                        withContext(Dispatchers.Main) {
+                            callback(address)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("Geocoding", "Error getting address: ${e.message}")
+                callback(null)
+            }
+        }
+    }
+
+    private fun formatAddress(address: Address): String {
+        val addressParts = mutableListOf<String>()
+
+        // Add the most specific information first
+        if (address.thoroughfare != null) {
+            addressParts.add(address.thoroughfare)
+        }
+
+        if (address.subLocality != null) {
+            addressParts.add(address.subLocality)
+        }
+
+        if (address.locality != null) {
+            addressParts.add(address.locality)
+        }
+
+        if (address.adminArea != null) {
+            addressParts.add(address.adminArea)
+        }
+
+        if (address.countryName != null) {
+            addressParts.add(address.countryName)
+        }
+
+        return addressParts.joinToString(", ")
+    }
+
     private fun startLocationUpdates() {
         try {
             locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -178,15 +242,30 @@ class MainActivity: FlutterActivity() {
             // Create a non-nullable LocationListener
             val listener = object : LocationListener {
                 override fun onLocationChanged(location: Location) {
-                    val locationData = mapOf(
-                        "latitude" to location.latitude,
-                        "longitude" to location.longitude,
+                    val latitude = location.latitude
+                    val longitude = location.longitude
+
+                    // Create initial location data without address
+                    val locationData = mutableMapOf<String, Any>(
+                        "latitude" to latitude,
+                        "longitude" to longitude,
                         "altitude" to location.altitude,
                         "accuracy" to location.accuracy,
                         "speed" to location.speed,
                         "time" to location.time
                     )
+
+                    // Send initial location data immediately
                     locationEventSink?.success(locationData)
+
+                    // Get address asynchronously and send updated data when available
+                    getAddressFromLocation(latitude, longitude) { address ->
+                        if (address != null) {
+                            val updatedData = HashMap<String, Any>(locationData)
+                            updatedData["address"] = address
+                            locationEventSink?.success(updatedData)
+                        }
+                    }
                 }
 
                 // Implement required methods for older Android versions

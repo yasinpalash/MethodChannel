@@ -35,6 +35,7 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
   String _networkType = 'Unknown';
   String _sensorData = 'Waiting for data...';
   String _locationData = 'Waiting for location...';
+  String _locationAddress = '';
   String _chargingStatus = 'Waiting for charging status...';
   String _cameraStatus = '';
   String _galleryStatus = '';
@@ -69,10 +70,16 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
     _locationEventChannel.receiveBroadcastStream().listen(
           (dynamic event) {
         setState(() {
+          // Update coordinates
           _locationData = 'Lat: ${event['latitude'].toStringAsFixed(6)}, '
               'Lng: ${event['longitude'].toStringAsFixed(6)}\n'
               'Alt: ${event['altitude'].toStringAsFixed(1)}m, '
               'Acc: ${event['accuracy'].toStringAsFixed(1)}m';
+
+          // Update address if available
+          if (event['address'] != null) {
+            _locationAddress = '📍 ${event['address']}';
+          }
         });
       },
       onError: (error) {
@@ -80,8 +87,10 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
           if (error.message.toString().contains('PERMISSION_DENIED') ||
               error.message.toString().contains('permission denied')) {
             _locationData = 'Location permission denied. Please grant location permissions in your device settings.';
+            _locationAddress = '';
           } else {
             _locationData = 'Location error: ${error.message}';
+            _locationAddress = '';
           }
         });
       },
@@ -205,7 +214,7 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
     );
   }
 
-  Widget _buildStreamCard(String title, String value, {Color? color, VoidCallback? onAction, String? actionLabel}) {
+  Widget _buildStreamCard(String title, String value, {Color? color, VoidCallback? onAction, String? actionLabel, String? subtitle}) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 10),
       elevation: 3,
@@ -221,6 +230,17 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
                     fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green[800])),
             const SizedBox(height: 10),
             Text(value, style: TextStyle(fontSize: 16)),
+            if (subtitle != null && subtitle.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
             if (onAction != null && actionLabel != null) ...[
               const SizedBox(height: 10),
               Align(
@@ -303,17 +323,17 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
           _buildStatusCard("Network Type", _networkType, _getNetworkType),
           _buildStatusCard("Camera Status", _cameraStatus, _openCamera),
           _buildStatusCard("Gallery Status", _galleryStatus, _openGallery),
-
+          _buildStreamCard("Sensor Data (Accelerometer)", _sensorData),
           _buildStreamCard(
             "Location Data",
             _locationData,
             color: Colors.blue.shade50,
+            subtitle: _locationAddress,
             onAction: _locationData.contains('permission denied') ? _openAppSettings : null,
             actionLabel: _locationData.contains('permission denied') ? 'Open Settings' : null,
           ),
           _buildStreamCard("Charging Status", _chargingStatus, color: Colors.amber.shade50),
           _buildFlashlightCard(),
-          _buildStreamCard("Sensor Data (Accelerometer)", _sensorData),
         ],
       ),
     );
