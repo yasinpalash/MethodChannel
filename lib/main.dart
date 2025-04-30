@@ -27,11 +27,16 @@ class NativeBridgeScreen extends StatefulWidget {
 
 class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
   static const MethodChannel _methodChannel = MethodChannel('native_bridge/method');
-  static const EventChannel _eventChannel = EventChannel('native_bridge/event');
+  static const EventChannel _accelerometerEventChannel = EventChannel('native_bridge/event');
+  static const EventChannel _locationEventChannel = EventChannel('native_bridge/location_event');
+  static const EventChannel _chargingEventChannel = EventChannel('native_bridge/charging_event');
 
   String _batteryLevel = 'Unknown';
   String _networkType = 'Unknown';
   String _sensorData = 'Waiting for data...';
+  String _locationData = 'Waiting for location...';
+  String _locationAddress = '';
+  String _chargingStatus = 'Waiting for charging status...';
   String _cameraStatus = '';
   String _galleryStatus = '';
   String _flashlightStatus = 'Off';
@@ -40,18 +45,75 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
   void initState() {
     super.initState();
     _listenToSensorData();
+    _listenToLocationData();
+    _listenToChargingStatus();
   }
 
   void _listenToSensorData() {
-    _eventChannel.receiveBroadcastStream().listen(
+    _accelerometerEventChannel.receiveBroadcastStream().listen(
           (dynamic event) {
         setState(() {
-          _sensorData = event.toString();
+          _sensorData = 'X: ${event['x'].toStringAsFixed(2)}, '
+              'Y: ${event['y'].toStringAsFixed(2)}, '
+              'Z: ${event['z'].toStringAsFixed(2)}';
         });
       },
       onError: (error) {
         setState(() {
           _sensorData = 'Sensor error: ${error.toString()}';
+        });
+      },
+    );
+  }
+
+  void _listenToLocationData() {
+    _locationEventChannel.receiveBroadcastStream().listen(
+          (dynamic event) {
+        setState(() {
+          // Update coordinates
+          _locationData = 'Lat: ${event['latitude'].toStringAsFixed(6)}, '
+              'Lng: ${event['longitude'].toStringAsFixed(6)}\n'
+              'Alt: ${event['altitude'].toStringAsFixed(1)}m, '
+              'Acc: ${event['accuracy'].toStringAsFixed(1)}m';
+
+          // Update address if available
+          if (event['address'] != null) {
+            _locationAddress = '📍 ${event['address']}';
+          }
+        });
+      },
+      onError: (error) {
+        setState(() {
+          if (error.message.toString().contains('PERMISSION_DENIED') ||
+              error.message.toString().contains('permission denied')) {
+            _locationData = 'Location permission denied. Please grant location permissions in your device settings.';
+            _locationAddress = '';
+          } else {
+            _locationData = 'Location error: ${error.message}';
+            _locationAddress = '';
+          }
+        });
+      },
+    );
+  }
+
+  void _listenToChargingStatus() {
+    _chargingEventChannel.receiveBroadcastStream().listen(
+          (dynamic event) {
+        setState(() {
+          if (event['status'] == 'charging' || event['status'] == 'connected') {
+            _chargingStatus = 'Charging (${event['level']?.toStringAsFixed(1)}%)';
+            if (event['source'] != null) {
+              _chargingStatus += '\nSource: ${event['source']}';
+            }
+          } else {
+            _chargingStatus = 'Not charging (${event['level']?.toStringAsFixed(1)}%)';
+          }
+        });
+      },
+      onError: (error) {
+        setState(() {
+          _chargingStatus = 'Charging status error: ${error.message}';
         });
       },
     );
@@ -152,22 +214,43 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
     );
   }
 
-  Widget _buildSensorCard() {
+  Widget _buildStreamCard(String title, String value, {Color? color, VoidCallback? onAction, String? actionLabel, String? subtitle}) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 10),
       elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      color: Colors.green.shade50,
+      color: color ?? Colors.green.shade50,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("Sensor Data (Accelerometer)",
+            Text(title,
                 style: TextStyle(
                     fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green[800])),
             const SizedBox(height: 10),
-            Text(_sensorData, style: TextStyle(fontSize: 16)),
+            Text(value, style: TextStyle(fontSize: 16)),
+            if (subtitle != null && subtitle.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+            if (onAction != null && actionLabel != null) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerRight,
+                child: ElevatedButton(
+                  onPressed: onAction,
+                  child: Text(actionLabel),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -205,6 +288,28 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
     );
   }
 
+  Future<void> _openAppSettings() async {
+    // This is a placeholder. In a real app, you would use a plugin like app_settings or permission_handler
+    // to open the app settings page.
+    // For example with permission_handler:
+    // await openAppSettings();
+
+    // For now, we'll just show a dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Open Settings'),
+        content: Text('To use location features, please open your device settings and grant location permissions to this app.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -218,7 +323,16 @@ class _NativeBridgeScreenState extends State<NativeBridgeScreen> {
           _buildStatusCard("Network Type", _networkType, _getNetworkType),
           _buildStatusCard("Camera Status", _cameraStatus, _openCamera),
           _buildStatusCard("Gallery Status", _galleryStatus, _openGallery),
-          _buildSensorCard(),
+          _buildStreamCard("Sensor Data (Accelerometer)", _sensorData),
+          _buildStreamCard(
+            "Location Data",
+            _locationData,
+            color: Colors.blue.shade50,
+            subtitle: _locationAddress,
+            onAction: _locationData.contains('permission denied') ? _openAppSettings : null,
+            actionLabel: _locationData.contains('permission denied') ? 'Open Settings' : null,
+          ),
+          _buildStreamCard("Charging Status", _chargingStatus, color: Colors.amber.shade50),
           _buildFlashlightCard(),
         ],
       ),
